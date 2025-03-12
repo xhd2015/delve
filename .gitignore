@@ -11,3 +11,6 @@ localtests
 *.iml
 .teamcity/target
 .vscode
+
+
+/tracing
