@@ -274,6 +274,62 @@ type returnBreakpointInfo struct {
 // CheckCondition evaluates bp's condition on thread.
 func (bp *Breakpoint) checkCondition(tgt *Target, thread Thread, bpstate *BreakpointState) {
 	*bpstate = BreakpointState{Breakpoint: bp, Active: false, Stepping: false, SteppingInto: false, CondError: nil}
+
+	// Check if this is a trap breakpoint that should print caller arguments
+	if bp.Logical != nil && bp.Logical.UserData != nil {
+		// The UserData field might contain the PrintCallerArgs flag from the original API breakpoint
+		if bp.Logical.FunctionName == "main.trap" {
+			// Get stack trace with 2 frames (current frame + caller)
+			frames, err := ThreadStacktrace(tgt, thread, 2)
+			if err != nil {
+				fmt.Printf("Could not get stacktrace: %v\n", err)
+			} else if len(frames) >= 2 {
+				// First frame is trap(), second frame is the caller
+				callerFrame := frames[1]
+
+				// Print caller information
+				fmt.Printf("Trap called from %s at %s:%d\n",
+					callerFrame.Call.Fn.Name,
+					callerFrame.Call.File,
+					callerFrame.Call.Line)
+
+				// Get caller's variables using FunctionArguments
+				scope := &EvalScope{
+					Location:    callerFrame.Current,
+					Regs:        callerFrame.Regs,
+					Mem:         thread.ProcessMemory(),
+					BinInfo:     thread.BinInfo(),
+					frameOffset: callerFrame.FrameOffset(),
+					threadID:    thread.ThreadID(),
+					target:      tgt,
+				}
+
+				vars, err := scope.FunctionArguments(LoadConfig{
+					FollowPointers:     true,
+					MaxVariableRecurse: 1,
+					MaxStringLen:       64,
+					MaxArrayValues:     64,
+					MaxStructFields:    -1,
+				})
+
+				if err != nil {
+					fmt.Printf("Could not get arguments: %v\n", err)
+				} else if len(vars) > 0 {
+					fmt.Println("Arguments:")
+					for _, v := range vars {
+						if v.Value != nil {
+							fmt.Printf("  %s = %v\n", v.Name, v.Value)
+						} else {
+							fmt.Printf("  %s = <unreadable>\n", v.Name)
+						}
+					}
+				} else {
+					fmt.Println("No arguments")
+				}
+			}
+		}
+	}
+
 	for _, breaklet := range bp.Breaklets {
 		bpstate.checkCond(tgt, breaklet, thread)
 	}

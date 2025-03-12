@@ -103,6 +103,9 @@ var (
 	attachWaitFor         string
 	attachWaitForInterval float64
 	attachWaitForDuration float64
+
+	// Add autoTrapFlag variable at the top of the file with other flag variables
+	autoTrapFlag bool
 )
 
 const dlvCommandLongDesc = `Delve is a source level debugger for Go programs.
@@ -268,6 +271,8 @@ session.`,
 	debugCommand.Flags().BoolVar(&continueOnStart, "continue", false, "Continue the debugged process on start.")
 	debugCommand.Flags().StringVar(&tty, "tty", "", "TTY to use for the target program")
 	must(debugCommand.MarkFlagFilename("tty"))
+	// Add the auto-trap flag
+	debugCommand.Flags().BoolVar(&autoTrapFlag, "auto-trap", false, "Automatically set breakpoint at main.trap() and print 'hello'")
 	rootCommand.AddCommand(debugCommand)
 
 	// 'exec' subcommand.
@@ -300,6 +305,7 @@ or later, -gcflags="-N -l" on earlier versions of Go.`,
 	execCommand.Flags().StringVar(&tty, "tty", "", "TTY to use for the target program")
 	must(execCommand.MarkFlagFilename("tty"))
 	execCommand.Flags().BoolVar(&continueOnStart, "continue", false, "Continue the debugged process on start.")
+	execCommand.Flags().BoolVar(&autoTrapFlag, "auto-trap", false, "Automatically set breakpoint at main.trap() and print 'hello'")
 	rootCommand.AddCommand(execCommand)
 
 	// Deprecated 'run' subcommand.
@@ -1139,6 +1145,7 @@ func execute(attachPid int, processArgs []string, conf *config.Config, coreFile 
 				AttachWaitFor:         attachWaitFor,
 				AttachWaitForInterval: attachWaitForInterval,
 				AttachWaitForDuration: attachWaitForDuration,
+				AutoTrap:              autoTrapFlag,
 			},
 		})
 	default:
