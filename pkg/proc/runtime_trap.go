@@ -2,6 +2,8 @@ package proc
 
 import (
 	"fmt"
+	"path/filepath"
+	"strconv"
 	"unsafe"
 
 	"runtime"
@@ -11,12 +13,34 @@ import (
 
 // test all:
 //
-//	./test-proc.sh
+//	./test-proc.sh -run TestRuntimeTrap -run TestRuntimeInpsectPC
 //
 // test specific:
 //
 //	./test-proc.sh -count 1 -v -run TestRuntimeInpsectType
 const testBin = "./__debug_bin_test"
+
+const __xgo_debug_log_enable = false
+
+func __xgo_debug_logf(format string, args ...interface{}) {
+	if !__xgo_debug_log_enable {
+		return
+	}
+	pc, file, line, ok := runtime.Caller(1)
+	if ok {
+		// baseFnName := runtime.FuncForPC(pc).Name()
+		// lastSlash := strings.LastIndex(baseFnName, "/")
+		// if lastSlash != -1 {
+		// 	baseFnName = baseFnName[lastSlash+1:]
+		// }
+		_ = pc
+		lineS := strconv.Itoa(line)
+		// %-3s: left-align the string with a width of 3 characters
+		fmt.Printf("%s:%-3s [DEBUG] ", filepath.Base(file), lineS)
+	}
+	fmt.Printf(format, args...)
+	fmt.Println()
+}
 
 var trapArgs []interface{}
 
@@ -34,7 +58,7 @@ func trap() {
 	callerPC := callerPCs[0]
 
 	callerFuncName := runtime.FuncForPC(callerPC).Name()
-	fmt.Printf("DEBUG: CallerFuncName: %s\n", callerFuncName)
+	__xgo_debug_logf("CallerFuncName: %s", callerFuncName)
 
 	fns, err := bi.FindFunction(callerFuncName)
 	if err != nil {
@@ -67,13 +91,15 @@ func trap() {
 		})
 	}
 
-	for _, arg := range fnArgs {
-		fmt.Printf("formalArg: %s, %s, isRet=%t\n", arg.name, arg.typ, arg.isret)
+	if __xgo_debug_log_enable {
+		for _, arg := range fnArgs {
+			__xgo_debug_logf("formalArg: %s, %s, isRet=%t", arg.name, arg.typ, arg.isret)
+		}
 	}
 
-	fmt.Printf("DEBUG: Number of expected args: %d\n", len(fnArgs))
-	fmt.Printf("DEBUG: Number of actual args: %d\n", len(args))
-	fmt.Printf("DEBUG: Actual args: %#v\n", args)
+	__xgo_debug_logf("Number of expected args: %d", len(fnArgs))
+	__xgo_debug_logf("Number of actual args: %d", len(args))
+	__xgo_debug_logf("Actual args: %#v", args)
 
 	convArgs, err := parseArgs(args, fnArgs)
 	if err != nil {
@@ -93,8 +119,9 @@ func parseArgs(args []interface{}, fnArgs []funcCallArg) ([]interface{}, error) 
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse argument: %s %v", fnArg.name, err)
 		}
-		fmt.Printf("DEBUG: Parsed %d\n", i)
-		fmt.Printf("DEBUG: Parsed arg %s: %#v\n", fnArg.name, convArg)
+
+		__xgo_debug_logf("Parsed %d", i)
+		__xgo_debug_logf("Parsed arg %s: %#v", fnArg.name, convArg)
 		convArgs[i] = convArg
 	}
 
@@ -117,34 +144,34 @@ func parseArg(arg interface{}, typ godwarf.Type) (interface{}, error) {
 	if arg == nil {
 		return nil, fmt.Errorf("argument is nil")
 	}
-	fmt.Printf("DEBUG: parseArg for type %s\n", typ)
+	__xgo_debug_logf("parseArg for type %s", typ)
 
 	switch t := typ.(type) {
 	case *godwarf.IntType:
-		fmt.Printf("DEBUG: Handling IntType: %#v\n", arg)
+		__xgo_debug_logf("handling IntType: %#v", arg)
 		return int(arg.(uint64)), nil
 	case *godwarf.BoolType:
-		fmt.Printf("DEBUG: Handling BoolType: %#v\n", arg)
+		__xgo_debug_logf("handling BoolType: %#v", arg)
 		// Boolean values are typically represented as uint8 (0=false, 1=true)
 		boolVal := arg.(uint64)
 		return boolVal != 0, nil
 	case *godwarf.StringType:
-		fmt.Printf("DEBUG: Handling StringType: %#v\n", arg)
+		__xgo_debug_logf("handling StringType: %#v", arg)
 		return parseStringArg(arg)
 	case *godwarf.FuncType:
-		fmt.Printf("DEBUG: Handling FuncType: %#v\n", arg)
+		__xgo_debug_logf("handling FuncType: %#v", arg)
 		// Function pointers are represented as addresses
 		funcPC := arg.(uint64)
 		// For a function, we return the function pointer/PC
 		return uintptr(funcPC), nil
 	case *godwarf.StructType:
-		fmt.Printf("DEBUG: Handling StructType: %#v\n", arg)
+		__xgo_debug_logf("handling StructType: %#v", arg)
 		return parseStructArg(arg, t)
 	case *godwarf.SliceType:
-		fmt.Printf("DEBUG: Handling SliceType: %#v\n", arg)
+		__xgo_debug_logf("handling SliceType: %#v", arg)
 		return parseSliceArg(arg, t)
 	case *godwarf.InterfaceType:
-		fmt.Printf("DEBUG: Handling InterfaceType: %#v\n", arg)
+		__xgo_debug_logf("handling InterfaceType: %#v", arg)
 		return parseInterfaceArg(arg, t)
 	default:
 		// We should not get here for types that need multiple arguments
@@ -181,7 +208,7 @@ func parseStringArg(arg interface{}) (string, error) {
 
 // parseStructArg processes a struct's fields from flattened runtime arguments
 func parseStructArg(args interface{}, typ *godwarf.StructType) (interface{}, error) {
-	fmt.Printf("DEBUG: Struct raw args: %#v\n", args)
+	__xgo_debug_logf("Struct raw args: %#v", args)
 
 	argsSlice, ok := args.([]interface{})
 	if !ok {
@@ -207,7 +234,7 @@ func parseStructArg(args interface{}, typ *godwarf.StructType) (interface{}, err
 }
 
 func parseSliceArg(args interface{}, typ *godwarf.SliceType) (interface{}, error) {
-	fmt.Printf("DEBUG: Slice raw args: %#v\n", args)
+	__xgo_debug_logf("Slice raw args: %#v", args)
 	argsSlice, ok := args.([]interface{})
 	if !ok {
 		return nil, fmt.Errorf("expected []interface{}, got %T", args)
@@ -238,35 +265,36 @@ func parseSliceArg(args interface{}, typ *godwarf.SliceType) (interface{}, error
 		cap:  int(capacity),
 	}
 
-	fmt.Printf("DEBUG: sliceHeader: %#v\n", sliceHeader)
+	__xgo_debug_logf("sliceHeader: %#v", sliceHeader)
 
 	switch typ.ElemType.(type) {
 	case *godwarf.IntType:
-		fmt.Printf("DEBUG: Returning []int from sliceHeader: %#v\n", sliceHeader)
+		__xgo_debug_logf("Returning []int from sliceHeader: %#v", sliceHeader)
 		return *(*[]int)(unsafe.Pointer(&sliceHeader)), nil
 	case *godwarf.StringType:
-		fmt.Printf("DEBUG: Returning []string from sliceHeader: %#v\n", sliceHeader)
+		__xgo_debug_logf("Returning []string from sliceHeader: %#v", sliceHeader)
 
 		ptr := (*[16]byte)(unsafe.Pointer(sliceHeader.data))
 		// hexdump 16 bytes from ptr
-		fmt.Printf("DEBUG: hexdump 16 bytes from ptr: %x\n", ptr[:16])
-		for i := 0; i < 2; i++ {
-			for j := 0; j < 8; j++ {
-				fmt.Printf("%02x ", ptr[i*8+j])
+		if __xgo_debug_log_enable {
+			__xgo_debug_logf("hexdump 16 bytes from ptr: %x\n", ptr[:16])
+			for i := 0; i < 2; i++ {
+				for j := 0; j < 8; j++ {
+					fmt.Printf("%02x ", ptr[i*8+j])
+				}
+				fmt.Println()
 			}
-			fmt.Printf("\n")
 		}
-		fmt.Printf("\n")
 
-		// fmt.Printf("DEBUG: a: %#v\n", a)
+		// __xgo_debug_logf("a: %#v", a)
 
 		// str00 := unsafeStringAt(uintptr(unsafe.Pointer(&a)))
-		// fmt.Printf("DEBUG: str00: %s\n", str00)
+		// __xgo_debug_logf("str00: %s", str00)
 
 		str0 := unsafeStringAt(sliceHeader.data)
-		fmt.Printf("DEBUG: str0: %s\n", str0)
+		__xgo_debug_logf("str0: %s", str0)
 		strSlice := *(*[]string)(unsafe.Pointer(&sliceHeader))
-		fmt.Printf("DEBUG: strSlice: %#v\n", strSlice)
+		__xgo_debug_logf("strSlice: %#v", strSlice)
 		return *(*[]string)(unsafe.Pointer(&sliceHeader)), nil
 	default:
 		return nil, fmt.Errorf("unsupported slice element type: %s", typ.ElemType)
@@ -285,7 +313,7 @@ type efaceHeader struct {
 
 // since we cannot return concrete interface type, so we convert iface to eface
 func parseInterfaceArg(args interface{}, typ *godwarf.InterfaceType) (interface{}, error) {
-	fmt.Printf("DEBUG: Interface T:%v raw args: %#v\n", typ, args)
+	__xgo_debug_logf("Interface Type:%v raw args: %#v", typ, args)
 
 	argsSlice, ok := args.([]interface{})
 	if !ok {
@@ -306,16 +334,16 @@ func parseInterfaceArg(args interface{}, typ *godwarf.InterfaceType) (interface{
 	}
 
 	var isIface bool
-	fmt.Printf("DEBUG: inner Type: %T %#v\n", typ.Type, typ.Type)
+	__xgo_debug_logf("inner Type: %T %#v", typ.Type, typ.Type)
 	if typedDefType, ok := typ.Type.(*godwarf.TypedefType); ok {
-		fmt.Printf("DEBUG: inner defed Type: %T %#v\n", typedDefType.Type, typedDefType.Type)
+		__xgo_debug_logf("inner defed Type: %T %#v", typedDefType.Type, typedDefType.Type)
 
 		if structType, ok := typedDefType.Type.(*godwarf.StructType); ok {
 			if structType.StructName == "runtime.iface" {
 				isIface = true
 			}
 			// for _, field := range structType.Field {
-			// 	fmt.Printf("DEBUG: inner struct field: %s %T %#v\n", field.Name, field.Type, field.Type)
+			// 	fmt.Printf("inner struct field: %s %T %#v", field.Name, field.Type, field.Type)
 			// }
 		}
 	}
@@ -326,7 +354,7 @@ func parseInterfaceArg(args interface{}, typ *godwarf.InterfaceType) (interface{
 			value:    uintptr(valuePtr),
 		}
 		eface := *(*efaceHeader)(unsafe.Pointer(&eh))
-		fmt.Printf("DEBUG: eface value: %#v\n", eface)
+		__xgo_debug_logf("eface value: %#v", eface)
 		return *(*interface{})(unsafe.Pointer(&eface)), nil
 	}
 
@@ -338,7 +366,7 @@ func parseInterfaceArg(args interface{}, typ *godwarf.InterfaceType) (interface{
 	}
 
 	val := *(*interface{})(unsafe.Pointer(&eface))
-	fmt.Printf("DEBUG: iface value: %#v\n", val)
+	__xgo_debug_logf("iface value: %#v", val)
 	return val, nil
 }
 

@@ -7,7 +7,7 @@ import (
 	"unsafe"
 )
 
-func TestRuntimeInpsectType(t *testing.T) {
+func TestRuntimeTrap_InpsectType(t *testing.T) {
 	bi := NewBinaryInfo(runtime.GOOS, runtime.GOARCH)
 	err := bi.LoadBinaryInfo(testBin, 0, nil)
 
