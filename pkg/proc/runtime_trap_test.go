@@ -7,14 +7,36 @@ import (
 	"unsafe"
 )
 
-func TestRuntimeTrap_InpsectType(t *testing.T) {
-	bi := NewBinaryInfo(runtime.GOOS, runtime.GOARCH)
-	err := bi.LoadBinaryInfo(testBin, 0, nil)
+const testBin = "./__debug_bin_test"
 
+var bi *BinaryInfo
+
+var t *testing.T
+
+var trapArgs []interface{}
+
+func init() {
+	bi = NewBinaryInfo(runtime.GOOS, runtime.GOARCH)
+	err := bi.LoadBinaryInfo(testBin, 0, nil)
 	if err != nil {
-		t.Fatalf("failed to load binary info: %v", err)
+		panic(fmt.Errorf("failed to load binary info: %v", err))
+	}
+}
+
+func trap() {
+	args, pc := runtime.XgoGetCallerArgs(1)
+
+	var err error
+	convArgs, err := RetrieveStackArgs(bi, pc, args)
+	if err != nil {
+		panic(fmt.Errorf("failed to retrieve stack args: %w", err))
 	}
 
+	trapArgs = convArgs
+}
+
+func TestRuntimeTrap_InpsectType(_t *testing.T) {
+	t = _t
 	fn, err := bi.FindFunction("main.main")
 	if err != nil {
 		t.Fatalf("failed to find function: %v", err)
@@ -54,7 +76,8 @@ func TestRuntimeTrap_InpsectType(t *testing.T) {
 	}
 }
 
-func TestRuntimeTrap_Struct(t *testing.T) {
+func TestRuntimeTrap_Struct(_t *testing.T) {
+	t = _t
 	ts := TestTrapStruct{
 		Name: "John",
 		Age:  30,
@@ -63,8 +86,8 @@ func TestRuntimeTrap_Struct(t *testing.T) {
 	t.Logf("trapArgs: %v", trapArgs)
 }
 
-func TestRuntimeTrap_Interface(myT *testing.T) {
-	t = myT
+func TestRuntimeTrap_Interface(_t *testing.T) {
+	t = _t
 	ts := TestTrapInterfaceImpl{
 		Value: "test value",
 	}
@@ -109,8 +132,8 @@ func TestRuntimeTrap_Interface(myT *testing.T) {
 	}
 }
 
-func TestRuntimeTrap_EmptyInterface(myT *testing.T) {
-	t = myT
+func TestRuntimeTrap_EmptyInterface(_t *testing.T) {
+	t = _t
 	ts := TestTrapInterfaceImpl{
 		Value: "test value",
 	}
@@ -124,7 +147,8 @@ type TestTrapStruct struct {
 }
 
 func fnTrapStruct(ts TestTrapStruct) []interface{} {
-	return runtime.XgoGetCallerArgs(0)
+	args, _ := runtime.XgoGetCallerArgs(0)
+	return args
 }
 
 type TestTrapInterface interface {
@@ -141,15 +165,17 @@ func (t *TestTrapInterfaceImpl) GetValue() string {
 func fnTrapInterface(ts TestTrapInterface) []interface{} {
 	itfIface := (*ifaceHeader)(unsafe.Pointer(&ts))
 	t.Logf("itfIface inside: %#v", itfIface)
-	return runtime.XgoGetCallerArgs(0)
+	args, _ := runtime.XgoGetCallerArgs(0)
+	return args
 }
 
 func fnTrapEmptyInterface(ts interface{}) []interface{} {
-	return runtime.XgoGetCallerArgs(0)
+	args, _ := runtime.XgoGetCallerArgs(0)
+	return args
 }
 
 func trapDebug() {
-	args := runtime.XgoGetCallerArgs(1)
+	args, _ := runtime.XgoGetCallerArgs(1)
 	t.Logf("args: %v", args)
 	bi := NewBinaryInfo(runtime.GOOS, runtime.GOARCH)
 	err := bi.LoadBinaryInfo(testBin, 0, nil)

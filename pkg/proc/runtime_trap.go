@@ -13,12 +13,11 @@ import (
 
 // test all:
 //
-//	./test-proc.sh -run TestRuntimeTrap -run TestRuntimeInpsectPC
+//	./test-proc.sh -v -run TestRuntimeTrap -run TestRuntimeInpsectPC
 //
 // test specific:
 //
 //	./test-proc.sh -count 1 -v -run TestRuntimeInpsectType
-const testBin = "./__debug_bin_test"
 
 const __xgo_debug_log_enable = false
 
@@ -42,45 +41,77 @@ func __xgo_debug_logf(format string, args ...interface{}) {
 	fmt.Println()
 }
 
-var trapArgs []interface{}
-
-func trap() {
-	args := runtime.XgoGetCallerArgs(1)
+func LoadBinary(binary string) (*BinaryInfo, error) {
 	bi := NewBinaryInfo(runtime.GOOS, runtime.GOARCH)
-	err := bi.LoadBinaryInfo(testBin, 0, nil)
+	err := bi.LoadBinaryInfo(binary, 0, nil)
 	if err != nil {
-		panic(fmt.Errorf("failed to load binary info: %v", err))
+		return nil, fmt.Errorf("failed to load binary info: %v", err)
 	}
+	return bi, nil
+}
 
-	var callerPCs [1]uintptr
-	runtime.Callers(2, callerPCs[:])
+type FuncParam struct {
+	Name string
+	Type godwarf.Type
+}
 
-	callerPC := callerPCs[0]
+func GetFuncParams(bi *BinaryInfo, pc uintptr) ([]FuncParam, error) {
+	args, err := getFuncParams(bi, pc)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get func args: %w", err)
+	}
+	params := make([]FuncParam, 0, len(args))
+	for _, arg := range args {
+		if arg.isret {
+			continue
+		}
+		params = append(params, FuncParam{
+			Name: arg.name,
+			Type: arg.typ,
+		})
+	}
+	return params, nil
+}
 
-	callerFuncName := runtime.FuncForPC(callerPC).Name()
+func getFuncParams(bi *BinaryInfo, pc uintptr) ([]funcCallArg, error) {
+	callerFuncName := runtime.FuncForPC(pc).Name()
 	__xgo_debug_logf("CallerFuncName: %s", callerFuncName)
 
 	fns, err := bi.FindFunction(callerFuncName)
 	if err != nil {
-		panic(fmt.Errorf("failed to find function: %s %v", callerFuncName, err))
+		return nil, fmt.Errorf("failed to find function: %s %w", callerFuncName, err)
 	}
 
 	if len(fns) == 0 {
-		panic(fmt.Errorf("found no functions: %s", callerFuncName))
+		return nil, fmt.Errorf("found no function: %s", callerFuncName)
 	}
 	if len(fns) != 1 {
-		panic(fmt.Errorf("found multiple functions: %s", callerFuncName))
+		return nil, fmt.Errorf("found multiple functions: %s", callerFuncName)
 	}
+
 	fn := fns[0]
 
 	_, formalArgs, err := funcCallArgs(fn, bi, true)
 	if err != nil {
-		panic(fmt.Errorf("failed to get caller formal args: %v", err))
+		return nil, fmt.Errorf("failed to get caller formal args: %w", err)
+	}
+	return formalArgs, nil
+}
+
+// callerPC:
+//
+//	var callerPCs [1]uintptr
+//	runtime.Callers(2, callerPCs[:])
+//	callerPC := callerPCs[0]
+func RetrieveStackArgs(bi *BinaryInfo, pc uintptr, stackArgs []interface{}) ([]interface{}, error) {
+	params, err := getFuncParams(bi, pc)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get func params: %w", err)
 	}
 
 	var fnArgs []funcCallArg
-	fnArgs = make([]funcCallArg, 0, len(formalArgs))
-	for _, arg := range formalArgs {
+	fnArgs = make([]funcCallArg, 0, len(params))
+	for _, arg := range params {
 		if arg.isret {
 			continue
 		}
@@ -98,15 +129,10 @@ func trap() {
 	}
 
 	__xgo_debug_logf("Number of expected args: %d", len(fnArgs))
-	__xgo_debug_logf("Number of actual args: %d", len(args))
-	__xgo_debug_logf("Actual args: %#v", args)
+	__xgo_debug_logf("Number of actual args: %d", len(stackArgs))
+	__xgo_debug_logf("Actual args: %#v", stackArgs)
 
-	convArgs, err := parseArgs(args, fnArgs)
-	if err != nil {
-		panic(fmt.Errorf("failed to parse arguments: %v", err))
-	}
-
-	trapArgs = convArgs
+	return parseArgs(stackArgs, fnArgs)
 }
 
 func parseArgs(args []interface{}, fnArgs []funcCallArg) ([]interface{}, error) {

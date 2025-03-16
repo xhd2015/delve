@@ -8,8 +8,6 @@ import (
 	"unsafe"
 )
 
-var t *testing.T
-
 // TestStruct is a simple struct for testing purposes
 type TestStruct struct {
 	Name string
@@ -30,8 +28,8 @@ func (t *TestInterfaceImpl) GetValue() string {
 	return t.Value
 }
 
-func TestRuntimeInpsectPC_String(myT *testing.T) {
-	t = myT
+func TestRuntimeInpsectPC_String(_t *testing.T) {
+	t = _t
 
 	s := fnString("hello")
 	expect := "hello"
@@ -43,8 +41,8 @@ func TestRuntimeInpsectPC_String(myT *testing.T) {
 		t.Fatalf("expected %v, got %v", expectTrapArgs, trapArgs)
 	}
 }
-func TestRuntimeInpsectPC_StrInt(myT *testing.T) {
-	t = myT
+func TestRuntimeInpsectPC_StrInt(_t *testing.T) {
+	t = _t
 
 	s := fnStrInt("hello", 1)
 	expect := "hello, 1"
@@ -57,8 +55,8 @@ func TestRuntimeInpsectPC_StrInt(myT *testing.T) {
 	}
 }
 
-func TestRuntimeInpsectPC_SliceInt(myT *testing.T) {
-	t = myT
+func TestRuntimeInpsectPC_SliceInt(_t *testing.T) {
+	t = _t
 
 	nums := []int{1, 2, 3}
 	s := fnSliceInt(nums)
@@ -75,8 +73,8 @@ func TestRuntimeInpsectPC_SliceInt(myT *testing.T) {
 // possible reason is: when the function returned
 // the stack is destroyed, so the string is not valid anymore
 // anything on stack is not persistent
-func TestRuntimeInpsectPC_SliceOneString(myT *testing.T) {
-	t = myT
+func TestRuntimeInpsectPC_SliceOneString(_t *testing.T) {
+	t = _t
 
 	strs := []string{
 		"hello",
@@ -111,8 +109,8 @@ func TestRuntimeInpsectPC_SliceOneString(myT *testing.T) {
 	}
 }
 
-func TestRuntimeInpsectPC_SliceMultiString(myT *testing.T) {
-	t = myT
+func TestRuntimeInpsectPC_SliceMultiString(_t *testing.T) {
+	t = _t
 
 	strs := []string{
 		"hello",
@@ -153,8 +151,8 @@ func TestRuntimeInpsectPC_SliceMultiString(myT *testing.T) {
 // 	fmt.Printf("\n")
 // }
 
-func TestRuntimeInpsectPC_Bool(myT *testing.T) {
-	t = myT
+func TestRuntimeInpsectPC_Bool(_t *testing.T) {
+	t = _t
 
 	b := fnBool(true)
 	expect := "Value: true"
@@ -167,8 +165,8 @@ func TestRuntimeInpsectPC_Bool(myT *testing.T) {
 	}
 }
 
-func TestRuntimeInpsectPC_Func(myT *testing.T) {
-	t = myT
+func TestRuntimeInpsectPC_Func(_t *testing.T) {
+	t = _t
 
 	testFunc := func() string { return "test" }
 	result := fnFunc(testFunc)
@@ -183,8 +181,8 @@ func TestRuntimeInpsectPC_Func(myT *testing.T) {
 	}
 }
 
-func TestRuntimeInpsectPC_Struct(myT *testing.T) {
-	t = myT
+func TestRuntimeInpsectPC_Struct(_t *testing.T) {
+	t = _t
 
 	testStruct := TestStruct{
 		Name: "John",
@@ -214,9 +212,8 @@ func TestRuntimeInpsectPC_Struct(myT *testing.T) {
 	}
 }
 
-func TestRuntimeInpsectPC_EmptyInterface(myT *testing.T) {
-	t = myT
-	// t.Skip("TODO fix")
+func TestRuntimeInpsectPC_EmptyInterface(_t *testing.T) {
+	t = _t
 
 	var testInterface TestInterface = &TestInterfaceImpl{Value: "test value"}
 	result := fnEmptyInterface(testInterface)
@@ -240,8 +237,8 @@ func TestRuntimeInpsectPC_EmptyInterface(myT *testing.T) {
 	}
 }
 
-func TestRuntimeInpsectPC_Interface(myT *testing.T) {
-	t = myT
+func TestRuntimeInpsectPC_Interface(_t *testing.T) {
+	t = _t
 
 	var ts TestInterface = &TestInterfaceImpl{Value: "test value"}
 

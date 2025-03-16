@@ -106,11 +106,6 @@ func (h *DefaultTrapHandler) HandleTrap(thread Thread, target *Target) error {
 		if err != nil {
 			return fmt.Errorf("could not modify args: %v", err)
 		}
-	} else {
-		err = h.UpdateTrapArgs(thread, target)
-		if err != nil {
-			return fmt.Errorf("could not modify args: %v", err)
-		}
 	}
 
 	// Print modified args
