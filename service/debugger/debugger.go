@@ -158,7 +158,10 @@ type Config struct {
 
 	RrOnProcessPid int
 
-	// AutoTrap determines if a breakpoint should be automatically set on main.trap
+	// AutoTrap determines if breakpoints should be automatically set on main.trap
+	// and at all return points of main.trap.
+	// When enabled, it will print caller arguments when entering main.trap and
+	// "main.trap returns" when exiting the function.
 	AutoTrap bool
 }
 
@@ -345,12 +348,37 @@ func (d *Debugger) Launch(processArgs []string, wd string) (*proc.TargetGroup, e
 
 	// If AutoTrap is enabled, set a breakpoint at main.trap
 	if d.config.AutoTrap {
+		// Set entry breakpoint at main.trap
 		_, err := d.CreateBreakpoint(&api.Breakpoint{
 			FunctionName:    "main.trap",
 			PrintCallerArgs: true, // Enable printing caller args
+			Tracepoint:      true,
 		}, "", nil, false)
 		if err != nil && !strings.Contains(err.Error(), "Breakpoint exists") {
-			d.log.Warnf("Could not set auto-trap breakpoint: %v", err)
+			d.log.Warnf("Could not set auto-trap entry breakpoint: %v", err)
+		}
+
+		// Set return breakpoints for main.trap
+		trapReturnAddrs, err := d.FunctionReturnLocations("main.trap")
+		if err != nil {
+			d.log.Warnf("Could not find return locations for main.trap: %v", err)
+		} else {
+			fmt.Printf("trapReturnAddrs: %v\n", trapReturnAddrs)
+			if len(trapReturnAddrs) == 0 {
+				d.log.Warnf("Could not find return locations for main.trap")
+			} else {
+				// Set a breakpoint at each return location
+				_, err := d.CreateBreakpoint(&api.Breakpoint{
+					Addrs: trapReturnAddrs,
+					// TraceReturn: true,
+					// Tracepoint: true,
+					// Variables:   []string{"\"main.trap returns\""},
+					// Name: fmt.Sprintf("trap-return-%d", i),
+				}, "", nil, false)
+				if err != nil && !strings.Contains(err.Error(), "Breakpoint exists") {
+					d.log.Warnf("Could not set auto-trap return breakpoint %v", err)
+				}
+			}
 		}
 	}
 

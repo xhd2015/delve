@@ -11,14 +11,11 @@ type TrapHandler interface {
 
 // DefaultTrapHandler is the default implementation of TrapHandler.
 type DefaultTrapHandler struct {
-	useSet bool // if true, use SetVariable, otherwise use low-level implementation
 }
 
 // NewDefaultTrapHandler creates a new DefaultTrapHandler.
 func NewDefaultTrapHandler() *DefaultTrapHandler {
-	return &DefaultTrapHandler{
-		useSet: false, // default to low-level implementation
-	}
+	return &DefaultTrapHandler{}
 }
 
 // HandleTrap implements the TrapHandler interface.
@@ -55,6 +52,8 @@ func (h *DefaultTrapHandler) HandleTrap(thread Thread, target *Target) error {
 		MaxArrayValues:     64,
 		MaxStructFields:    -1,
 	})
+
+	fmt.Printf("Goroutine %d\n", g.ID)
 
 	if err != nil {
 		fmt.Printf("Could not get caller arguments: %v\n", err)
@@ -98,38 +97,6 @@ func (h *DefaultTrapHandler) HandleTrap(thread Thread, target *Target) error {
 		}
 	} else {
 		fmt.Println("No arguments")
-	}
-
-	// Modify args using either SetVariable or low-level implementation
-	if h.useSet {
-		err = scope.SetVariable("args", "[]interface{}{true}")
-		if err != nil {
-			return fmt.Errorf("could not modify args: %v", err)
-		}
-	}
-
-	// Print modified args
-	vars, err = scope.FunctionArguments(LoadConfig{
-		FollowPointers:     true,
-		MaxVariableRecurse: 1,
-		MaxStringLen:       64,
-		MaxArrayValues:     64,
-		MaxStructFields:    -1,
-	})
-
-	if err != nil {
-		return fmt.Errorf("could not get modified arguments: %v", err)
-	}
-
-	if len(vars) > 0 {
-		fmt.Println("Modified Arguments:")
-		for _, v := range vars {
-			if v.Value != nil {
-				fmt.Printf("  %s = %v\n", v.Name, v.Value)
-			} else {
-				fmt.Printf("  %s = <unreadable>\n", v.Name)
-			}
-		}
 	}
 
 	return nil
