@@ -103,6 +103,9 @@ var (
 	attachWaitFor         string
 	attachWaitForInterval float64
 	attachWaitForDuration float64
+
+	// Add autoTrapFlag variable at the top of the file with other flag variables
+	autoTrapFlag bool
 )
 
 const dlvCommandLongDesc = `Delve is a source level debugger for Go programs.
@@ -268,6 +271,8 @@ session.`,
 	debugCommand.Flags().BoolVar(&continueOnStart, "continue", false, "Continue the debugged process on start.")
 	debugCommand.Flags().StringVar(&tty, "tty", "", "TTY to use for the target program")
 	must(debugCommand.MarkFlagFilename("tty"))
+	// Add the auto-trap flag
+	debugCommand.Flags().BoolVar(&autoTrapFlag, "auto-trap", false, "Automatically set breakpoints at main.trap() and its return points")
 	rootCommand.AddCommand(debugCommand)
 
 	// 'exec' subcommand.
@@ -300,6 +305,7 @@ or later, -gcflags="-N -l" on earlier versions of Go.`,
 	execCommand.Flags().StringVar(&tty, "tty", "", "TTY to use for the target program")
 	must(execCommand.MarkFlagFilename("tty"))
 	execCommand.Flags().BoolVar(&continueOnStart, "continue", false, "Continue the debugged process on start.")
+	execCommand.Flags().BoolVar(&autoTrapFlag, "auto-trap", false, "Automatically set breakpoints at main.trap() and its return points")
 	rootCommand.AddCommand(execCommand)
 
 	// Deprecated 'run' subcommand.
@@ -780,7 +786,7 @@ func traceCmd(cmd *cobra.Command, args []string, conf *config.Config) int {
 				if traceFollowCalls > 0 && stackdepth == 0 {
 					stackdepth = 20
 				}
-				_, err = client.CreateBreakpoint(&api.Breakpoint{
+				entryBP, err := client.CreateBreakpoint(&api.Breakpoint{
 					FunctionName:     funcs[i],
 					Tracepoint:       true,
 					Line:             -1,
@@ -789,16 +795,27 @@ func traceCmd(cmd *cobra.Command, args []string, conf *config.Config) int {
 					TraceFollowCalls: traceFollowCalls,
 					RootFuncName:     regexp,
 				})
-
 				if err != nil && !isBreakpointExistsErr(err) {
 					fmt.Fprintf(os.Stderr, "unable to set tracepoint on function %s: %#v\n", funcs[i], err)
 					continue
 				} else {
 					success = true
 				}
+
+				entryAddrs := entryBP.Addrs
+				// fmt.Fprintf(os.Stderr, "entry addrs: %s %v\n", funcs[i], entryAddrs)
 				addrs, err := client.FunctionReturnLocations(funcs[i])
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "unable to set tracepoint on function %s: %#v\n", funcs[i], err)
+					continue
+				}
+				// fmt.Fprintf(os.Stderr, "return addrs: %s %v\n", funcs[i], addrs)
+
+				// if the entry breakpoint
+				// then cancel previous breakpoint and continue
+				if len(entryAddrs) == 1 && len(addrs) == 1 && entryAddrs[0] == addrs[0] {
+					fmt.Fprintf(os.Stderr, "same entry and return address,cancelled: %s\n", funcs[i])
+					client.ClearBreakpoint(entryBP.ID)
 					continue
 				}
 				for i := range addrs {
@@ -1139,6 +1156,7 @@ func execute(attachPid int, processArgs []string, conf *config.Config, coreFile 
 				AttachWaitFor:         attachWaitFor,
 				AttachWaitForInterval: attachWaitForInterval,
 				AttachWaitForDuration: attachWaitForDuration,
+				AutoTrap:              autoTrapFlag,
 			},
 		})
 	default:

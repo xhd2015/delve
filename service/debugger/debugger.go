@@ -157,6 +157,12 @@ type Config struct {
 	DisableASLR bool
 
 	RrOnProcessPid int
+
+	// AutoTrap determines if breakpoints should be automatically set on main.trap
+	// and at all return points of main.trap.
+	// When enabled, it will print caller arguments when entering main.trap and
+	// "main.trap returns" when exiting the function.
+	AutoTrap bool
 }
 
 // New creates a new Debugger. ProcessArgs specify the commandline arguments for the
@@ -279,11 +285,20 @@ func (d *Debugger) Launch(processArgs []string, wd string) (*proc.TargetGroup, e
 		launchFlags |= proc.LaunchDisableASLR
 	}
 
+	var targetGroup *proc.TargetGroup
+
 	switch d.config.Backend {
 	case "native":
-		return native.Launch(processArgs, wd, launchFlags, d.config.DebugInfoDirectories, d.config.TTY, d.config.Stdin, d.config.Stdout, d.config.Stderr)
+		targetGroup, err = native.Launch(processArgs, wd, launchFlags, d.config.DebugInfoDirectories, d.config.TTY, d.config.Stdin, d.config.Stdout, d.config.Stderr)
+		if err != nil {
+			return nil, err
+		}
 	case "lldb":
-		return betterGdbserialLaunchError(gdbserial.LLDBLaunch(processArgs, wd, launchFlags, d.config.DebugInfoDirectories, d.config.TTY, [3]string{d.config.Stdin, d.config.Stdout.Path, d.config.Stderr.Path}))
+		var err2 error
+		targetGroup, err2 = gdbserial.LLDBLaunch(processArgs, wd, launchFlags, d.config.DebugInfoDirectories, d.config.TTY, [3]string{d.config.Stdin, d.config.Stdout.Path, d.config.Stderr.Path})
+		if err2 != nil {
+			return betterGdbserialLaunchError(targetGroup, err2)
+		}
 	case "rr":
 		if d.target != nil {
 			// restart should not call us if the backend is 'rr'
@@ -303,34 +318,71 @@ func (d *Debugger) Launch(processArgs []string, wd string) (*proc.TargetGroup, e
 
 		go func() {
 			defer d.targetMutex.Unlock()
-
-			grp, err := d.recordingRun(run)
+			var err error
+			targetGroup, err = d.recordingRun(run)
 			if err != nil {
+				d.recordingDone()
 				d.log.Errorf("could not record target: %v", err)
-				// this is ugly, but we can't respond to any client requests at this
-				// point, so it's better if we die.
-				os.Exit(1)
-			}
-			d.recordingDone()
-			d.target = grp
-			if err := d.checkGoVersion(); err != nil {
-				d.log.Error(err)
-				err := d.target.Detach(true)
-				if err != nil {
-					d.log.Errorf("Error detaching from target: %v", err)
-				}
 			}
 		}()
-		return nil, nil
 
+		return nil, fmt.Errorf("process is running")
 	case "default":
 		if runtime.GOOS == "darwin" {
-			return betterGdbserialLaunchError(gdbserial.LLDBLaunch(processArgs, wd, launchFlags, d.config.DebugInfoDirectories, d.config.TTY, [3]string{d.config.Stdin, d.config.Stdout.Path, d.config.Stderr.Path}))
+			var err2 error
+			targetGroup, err2 = gdbserial.LLDBLaunch(processArgs, wd, launchFlags, d.config.DebugInfoDirectories, d.config.TTY, [3]string{d.config.Stdin, d.config.Stdout.Path, d.config.Stderr.Path})
+			if err2 != nil {
+				return betterGdbserialLaunchError(targetGroup, err2)
+			}
+		} else {
+			targetGroup, err = native.Launch(processArgs, wd, launchFlags, d.config.DebugInfoDirectories, d.config.TTY, d.config.Stdin, d.config.Stdout, d.config.Stderr)
+			if err != nil {
+				return nil, err
+			}
 		}
-		return native.Launch(processArgs, wd, launchFlags, d.config.DebugInfoDirectories, d.config.TTY, d.config.Stdin, d.config.Stdout, d.config.Stderr)
 	default:
 		return nil, fmt.Errorf("unknown backend %q", d.config.Backend)
 	}
+
+	d.target = targetGroup
+
+	// If AutoTrap is enabled, set a breakpoint at main.trap
+	if d.config.AutoTrap {
+		// Set entry breakpoint at main.trap
+		_, err := d.CreateBreakpoint(&api.Breakpoint{
+			FunctionName:    "main.trap",
+			PrintCallerArgs: true, // Enable printing caller args
+			Tracepoint:      true,
+		}, "", nil, false)
+		if err != nil && !strings.Contains(err.Error(), "Breakpoint exists") {
+			d.log.Warnf("Could not set auto-trap entry breakpoint: %v", err)
+		}
+
+		// Set return breakpoints for main.trap
+		trapReturnAddrs, err := d.FunctionReturnLocations("main.trap")
+		if err != nil {
+			d.log.Warnf("Could not find return locations for main.trap: %v", err)
+		} else {
+			fmt.Printf("trapReturnAddrs: %v\n", trapReturnAddrs)
+			if len(trapReturnAddrs) == 0 {
+				d.log.Warnf("Could not find return locations for main.trap")
+			} else {
+				// Set a breakpoint at each return location
+				_, err := d.CreateBreakpoint(&api.Breakpoint{
+					Addrs: trapReturnAddrs,
+					// TraceReturn: true,
+					// Tracepoint: true,
+					// Variables:   []string{"\"main.trap returns\""},
+					// Name: fmt.Sprintf("trap-return-%d", i),
+				}, "", nil, false)
+				if err != nil && !strings.Contains(err.Error(), "Breakpoint exists") {
+					d.log.Warnf("Could not set auto-trap return breakpoint %v", err)
+				}
+			}
+		}
+	}
+
+	return targetGroup, nil
 }
 
 func (d *Debugger) recordingStart(stop func() error) {
@@ -888,6 +940,8 @@ func (d *Debugger) CancelNext() error {
 	return d.target.ClearSteppingBreakpoints()
 }
 
+// copyLogicalBreakpointInfo copies information from a user
+// specified breakpoint to a logical breakpoint.
 func (d *Debugger) copyLogicalBreakpointInfo(lbp *proc.LogicalBreakpoint, requested *api.Breakpoint) error {
 	lbp.Name = requested.Name
 	lbp.Tracepoint = requested.Tracepoint
@@ -897,9 +951,16 @@ func (d *Debugger) copyLogicalBreakpointInfo(lbp *proc.LogicalBreakpoint, reques
 	lbp.Variables = requested.Variables
 	lbp.LoadArgs = api.LoadConfigToProc(requested.LoadArgs)
 	lbp.LoadLocals = api.LoadConfigToProc(requested.LoadLocals)
-	lbp.UserData = requested.UserData
+	lbp.HitCondPerG = requested.HitCondPerG
 	lbp.RootFuncName = requested.RootFuncName
 	lbp.TraceFollowCalls = requested.TraceFollowCalls
+
+	// Store PrintCallerArgs flag in UserData
+	if requested.PrintCallerArgs {
+		lbp.UserData = requested
+	} else {
+		lbp.UserData = requested.UserData
+	}
 
 	return d.target.ChangeBreakpointCondition(lbp, requested.Cond, requested.HitCond, requested.HitCondPerG)
 }
