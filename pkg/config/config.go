@@ -114,6 +114,12 @@ type Config struct {
 	// TraceShowTimestamp controls whether to show timestamp in the trace
 	// output.
 	TraceShowTimestamp bool `yaml:"trace-show-timestamp"`
+
+	// TraceWith specifies which trace processor to use.
+	// Supported values include:
+	//  - json: format trace output as JSON
+	//  - flamegraph: format for use with flamegraph visualization tools
+	TraceWith string `yaml:"trace-with"`
 }
 
 func (c *Config) GetSourceListLineCount() int {

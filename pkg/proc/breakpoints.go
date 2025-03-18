@@ -274,6 +274,19 @@ type returnBreakpointInfo struct {
 // CheckCondition evaluates bp's condition on thread.
 func (bp *Breakpoint) checkCondition(tgt *Target, thread Thread, bpstate *BreakpointState) {
 	*bpstate = BreakpointState{Breakpoint: bp, Active: false, Stepping: false, SteppingInto: false, CondError: nil}
+
+	// Check if this is a trap breakpoint that should print caller arguments
+	if bp.Logical != nil && bp.Logical.FunctionName == "main.trap" {
+		if bp.Logical.TraceReturn {
+			fmt.Println("main.trap returns")
+		} else {
+			handler := NewDefaultTrapHandler()
+			if err := handler.HandleTrap(thread, tgt); err != nil {
+				fmt.Printf("Error handling trap: %v\n", err)
+			}
+		}
+	}
+
 	for _, breaklet := range bp.Breaklets {
 		bpstate.checkCond(tgt, breaklet, thread)
 	}
