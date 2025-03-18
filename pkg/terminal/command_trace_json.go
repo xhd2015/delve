@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -12,41 +13,8 @@ import (
 	"github.com/go-delve/delve/service/api"
 )
 
-// this file is extended by user
-// TODO: complete this file
-
-// doc:
-//  search for trace breakpoints set
-//     addrs, err := client.FunctionReturnLocations
-
-var isTraceCmd bool = true
-var outputJSON bool = true
-var jsonInfoWriter io.Writer
-var jsonTraceWriter io.Writer
-
-var recordStartingPoint string = "main.main"
-
-func init() {
-	if isTraceCmd && outputJSON {
-		file, err := os.OpenFile("trace-log.txt", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-		if err != nil {
-			fmt.Printf("failed to open trace.txt: %s\n", err)
-			os.Exit(1)
-		}
-		jsonInfoWriter = file
-
-		traceJSONFile, err := os.OpenFile("trace.json", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
-		if err != nil {
-			fmt.Printf("failed to open trace.json: %s\n", err)
-			os.Exit(1)
-		}
-		jsonTraceWriter = traceJSONFile
-	}
-}
-
+// per-goroutine stack: goid(int64) -> *Stack
 var goroutineStacks sync.Map
-
-// assume same goroutine
 
 type Stack struct {
 	GoroutineID int64
@@ -112,6 +80,10 @@ func getGoroutineStack(goid int64) *Stack {
 	return stack.(*Stack)
 }
 
+func clearStack(goid int64) {
+	goroutineStacks.Delete(goid)
+}
+
 func (c *Stack) SetData(key, value interface{}) {
 	if c.Data == nil {
 		c.Data = make(map[interface{}]interface{}, 1)
@@ -138,21 +110,52 @@ type traceStartedKeyType struct{}
 
 var traceStartedKey traceStartedKeyType
 
-func printTracepointJSON(t *Term, th *api.Thread, fn *api.Function, args string) {
+type traceWithConfigFileKeyType struct{}
+
+var traceWithConfigFileKey traceWithConfigFileKeyType
+
+var traceDebugWriter io.Writer = io.Discard
+
+// var traceDebugWriter io.Writer = os.Stderr
+
+func traceWithJSON(t *Term, th *api.Thread, fn *api.Function, traceWith string, args string) {
 	goID := th.GoroutineID
 	stack := getGoroutineStack(goID)
 
 	if stack.GetData(traceStartedKey) == nil {
 		funcName := fn.Name()
-		if funcName != recordStartingPoint {
+		if funcName != traceWith {
 			return
 		}
+
+		var conf *api.Variable
+		for _, arg := range th.BreakpointInfo.Arguments {
+			if arg.Name == "config" {
+				conf = &arg
+				break
+			}
+		}
+		if conf == nil || conf.Kind != reflect.Struct {
+			return
+		}
+		var outputFile string
+		for _, child := range conf.Children {
+			switch child.Name {
+			case "OutputFile":
+				outputFile = child.Value
+			}
+		}
+		if outputFile == "" {
+			return
+		}
+
+		// read first arg's config
 		stack.SetData(traceStartedKey, true)
+		stack.SetData(traceWithConfigFileKey, outputFile)
 		stack.Begin = time.Now()
 	}
 
 	bp := th.Breakpoint
-
 	if bp.Tracepoint {
 		startNano := time.Now().UnixNano() - stack.Begin.UnixNano()
 		prefix := strings.Repeat(" ", stack.Depth())
@@ -166,8 +169,8 @@ func printTracepointJSON(t *Term, th *api.Thread, fn *api.Function, args string)
 		}
 		stack.Push(cur)
 
-		fmt.Fprint(jsonInfoWriter, prefix)
-		fmt.Fprintf(jsonInfoWriter, "call: %s(%s)\n", fn.Name(), args)
+		fmt.Fprint(traceDebugWriter, prefix)
+		fmt.Fprintf(traceDebugWriter, "call: %s(%s)\n", fn.Name(), args)
 	}
 	if bp.TraceReturn {
 		cur := stack.Pop()
@@ -186,17 +189,38 @@ func printTracepointJSON(t *Term, th *api.Thread, fn *api.Function, args string)
 		}
 
 		prefix := strings.Repeat(" ", stack.Depth())
-		fmt.Fprint(jsonInfoWriter, prefix)
-		fmt.Fprintf(jsonInfoWriter, "return: %s%s\n", cur.FuncName, suffix)
+		fmt.Fprint(traceDebugWriter, prefix)
+		fmt.Fprintf(traceDebugWriter, "return: %s%s\n", cur.FuncName, suffix)
 
 		if stack.Depth() == 0 {
-			fmt.Fprintf(jsonInfoWriter, "root returned\n")
+			fmt.Fprintf(traceDebugWriter, "root returned\n")
+
+			outputFileData := stack.GetData(traceWithConfigFileKey)
+			if outputFileData == nil {
+				fmt.Fprintf(traceDebugWriter, "no output file\n")
+				return
+			}
+			outputFile, _ := outputFileData.(string)
+			if outputFile == "" {
+				fmt.Fprintf(traceDebugWriter, "output file is empty\n")
+				return
+			}
+
+			// append to file
+			file, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				fmt.Fprintf(traceDebugWriter, "failed to open output file: %s\n", err)
+				return
+			}
+			defer file.Close()
+
 			// export := stack.Export()
 			export := ConvertStack(stack)
-			err := json.NewEncoder(jsonTraceWriter).Encode(export)
+			err = json.NewEncoder(file).Encode(export)
 			if err != nil {
-				fmt.Fprintf(jsonInfoWriter, "failed to encode trace: %s\n", err)
+				fmt.Fprintf(traceDebugWriter, "failed to encode trace: %s\n", err)
 			}
+			clearStack(goID)
 		}
 	}
 }

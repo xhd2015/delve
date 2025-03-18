@@ -30,6 +30,7 @@ dlv trace [package] regexp [flags]
   -s, --stack int          Show stack trace with given depth. (Ignored with --ebpf)
   -t, --test               Trace a test binary.
       --timestamp          Show timestamp in the output
+      --trace-with fn      Specify a runtime trace entry function
 ```
 
 ### Options inherited from parent commands

@@ -138,9 +138,6 @@ type Breakpoint struct {
 	RootFuncName string
 	// TraceFollowCalls indicates the Depth of tracing
 	TraceFollowCalls int
-
-	// PrintCallerArgs indicates whether to print caller arguments when hit
-	PrintCallerArgs bool `json:"printCallerArgs,omitempty"`
 }
 
 // ValidBreakpointName returns an error if

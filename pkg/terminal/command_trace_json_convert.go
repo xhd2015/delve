@@ -8,6 +8,7 @@ import (
 
 func ConvertStack(stack *Stack) *xgo_trace.Stack {
 	return &xgo_trace.Stack{
+		Format:   "stack",
 		Begin:    stack.Begin.Format(time.RFC3339),
 		Children: ConvertStackEntries(stack.Roots),
 	}

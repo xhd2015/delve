@@ -89,6 +89,7 @@ var (
 	traceUseEBPF       bool
 	traceShowTimestamp bool
 	traceFollowCalls   int
+	traceWith          string // Format to use for trace output
 
 	// redirect specifications for target process
 	redirects []string
@@ -371,6 +372,7 @@ only see the output of the trace operations you can redirect stdout.`,
 	traceCommand.Flags().String("output", "", "Output path for the binary.")
 	must(traceCommand.MarkFlagFilename("output"))
 	traceCommand.Flags().IntVarP(&traceFollowCalls, "follow-calls", "", 0, "Trace all children of the function to the required depth")
+	traceCommand.Flags().StringVar(&traceWith, "trace-with", "", "Specify trace processor to use (e.g., 'json', 'flamegraph')")
 	rootCommand.AddCommand(traceCommand)
 
 	coreCommand := &cobra.Command{
@@ -786,12 +788,21 @@ func traceCmd(cmd *cobra.Command, args []string, conf *config.Config) int {
 				if traceFollowCalls > 0 && stackdepth == 0 {
 					stackdepth = 20
 				}
+				var loadArgs *api.LoadConfig
+				if traceWith == "" || traceWith != funcs[i] {
+					loadArgs = &terminal.ShortLoadConfig
+				} else {
+					shrt := terminal.ShortLoadConfig
+					shrt.MaxStringLen = 1024
+					shrt.MaxStructFields = 1024
+					loadArgs = &shrt
+				}
 				entryBP, err := client.CreateBreakpoint(&api.Breakpoint{
 					FunctionName:     funcs[i],
 					Tracepoint:       true,
 					Line:             -1,
 					Stacktrace:       stackdepth,
-					LoadArgs:         &terminal.ShortLoadConfig,
+					LoadArgs:         loadArgs,
 					TraceFollowCalls: traceFollowCalls,
 					RootFuncName:     regexp,
 				})
@@ -809,11 +820,11 @@ func traceCmd(cmd *cobra.Command, args []string, conf *config.Config) int {
 					fmt.Fprintf(os.Stderr, "unable to set tracepoint on function %s: %#v\n", funcs[i], err)
 					continue
 				}
-				// fmt.Fprintf(os.Stderr, "return addrs: %s %v\n", funcs[i], addrs)
 
-				// if the entry breakpoint
-				// then cancel previous breakpoint and continue
-				if len(entryAddrs) == 1 && len(addrs) == 1 && entryAddrs[0] == addrs[0] {
+				// for empty functions like `func empty(){}`,
+				// the entry breakpoint and return breakpoint will be the same
+				// we cannot capture return, so cancel the entry breakpoint
+				if traceWith != "" && len(entryAddrs) == 1 && len(addrs) == 1 && entryAddrs[0] == addrs[0] {
 					fmt.Fprintf(os.Stderr, "same entry and return address,cancelled: %s\n", funcs[i])
 					client.ClearBreakpoint(entryBP.ID)
 					continue
@@ -843,6 +854,7 @@ func traceCmd(cmd *cobra.Command, args []string, conf *config.Config) int {
 		cmds := terminal.DebugCommands(client)
 		cfg := &config.Config{
 			TraceShowTimestamp: traceShowTimestamp,
+			TraceWith:          traceWith,
 		}
 		t := terminal.New(client, cfg)
 		t.SetTraceNonInteractive()

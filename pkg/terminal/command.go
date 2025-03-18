@@ -2927,10 +2927,12 @@ func printBreakpointInfo(t *Term, th *api.Thread, tracepointOnNewline bool) {
 }
 
 func printTracepoint(t *Term, th *api.Thread, bpname string, fn *api.Function, args string, hasReturnValue bool) {
-	if outputJSON {
-		printTracepointJSON(t, th, fn, args)
+	if t.conf.TraceWith != "" {
+		traceWithJSON(t, th, fn, t.conf.TraceWith, args)
 		return
 	}
+
+	// Use default behavior if no specific processor is set or for unsupported processors
 	if t.conf.TraceShowTimestamp {
 		fmt.Fprintf(t.stdout, "%s ", time.Now().Format(time.RFC3339Nano))
 	}

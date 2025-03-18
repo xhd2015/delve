@@ -350,9 +350,8 @@ func (d *Debugger) Launch(processArgs []string, wd string) (*proc.TargetGroup, e
 	if d.config.AutoTrap {
 		// Set entry breakpoint at main.trap
 		_, err := d.CreateBreakpoint(&api.Breakpoint{
-			FunctionName:    "main.trap",
-			PrintCallerArgs: true, // Enable printing caller args
-			Tracepoint:      true,
+			FunctionName: "main.trap",
+			Tracepoint:   true,
 		}, "", nil, false)
 		if err != nil && !strings.Contains(err.Error(), "Breakpoint exists") {
 			d.log.Warnf("Could not set auto-trap entry breakpoint: %v", err)
@@ -954,13 +953,6 @@ func (d *Debugger) copyLogicalBreakpointInfo(lbp *proc.LogicalBreakpoint, reques
 	lbp.HitCondPerG = requested.HitCondPerG
 	lbp.RootFuncName = requested.RootFuncName
 	lbp.TraceFollowCalls = requested.TraceFollowCalls
-
-	// Store PrintCallerArgs flag in UserData
-	if requested.PrintCallerArgs {
-		lbp.UserData = requested
-	} else {
-		lbp.UserData = requested.UserData
-	}
 
 	return d.target.ChangeBreakpointCondition(lbp, requested.Cond, requested.HitCond, requested.HitCondPerG)
 }
