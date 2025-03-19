@@ -101,9 +101,12 @@ type Variable struct {
 	mem       MemoryReadWriter
 	bi        *BinaryInfo
 
-	Value        constant.Value
-	FloatSpecial floatSpecial
-	reg          *op.DwarfRegister // contains the value of this variable if VariableCPURegister flag is set and loaded is false
+	Native bool // native indicates that the variable is in the same goroutine
+
+	Value          constant.Value
+	InterfaceValue interface{}
+	FloatSpecial   floatSpecial
+	reg            *op.DwarfRegister // contains the value of this variable if VariableCPURegister flag is set and loaded is false
 
 	Len int64
 	Cap int64
@@ -603,10 +606,14 @@ func newVariableFromThread(t Thread, name string, addr uint64, dwarfType godwarf
 }
 
 func (v *Variable) newVariable(name string, addr uint64, dwarfType godwarf.Type, mem MemoryReadWriter) *Variable {
-	return newVariable(name, addr, dwarfType, v.bi, mem)
+	return newVarilableOpts(name, addr, dwarfType, v.bi, mem, v.Native)
 }
 
 func newVariable(name string, addr uint64, dwarfType godwarf.Type, bi *BinaryInfo, mem MemoryReadWriter) *Variable {
+	return newVarilableOpts(name, addr, dwarfType, bi, mem, false)
+}
+
+func newVarilableOpts(name string, addr uint64, dwarfType godwarf.Type, bi *BinaryInfo, mem MemoryReadWriter, native bool) *Variable {
 	if styp, isstruct := dwarfType.(*godwarf.StructType); isstruct && !strings.Contains(styp.Name, "<") && !strings.Contains(styp.Name, "{") {
 		// For named structs the compiler will emit a DW_TAG_structure_type entry
 		// and a DW_TAG_typedef entry.
@@ -638,6 +645,7 @@ func newVariable(name string, addr uint64, dwarfType godwarf.Type, bi *BinaryInf
 		DwarfType: dwarfType,
 		mem:       mem,
 		bi:        bi,
+		Native:    native,
 	}
 
 	v.RealType = resolveTypedef(v.DwarfType)
@@ -1327,12 +1335,13 @@ func (v *Variable) loadValueInternal(recurseLevel int, cfg LoadConfig) {
 	case reflect.Chan:
 		sv := v.clone()
 		sv.RealType = resolveTypedef(&(sv.RealType.(*godwarf.ChanType).TypedefType))
-		sv = sv.maybeDereference()
-		sv.loadValueInternal(0, loadFullValue)
-		v.Children = sv.Children
-		v.Len = sv.Len
-		v.Base = sv.Addr
-
+		if !sv.Native {
+			sv = sv.maybeDereference()
+			sv.loadValueInternal(0, loadFullValue)
+			v.Children = sv.Children
+			v.Len = sv.Len
+			v.Base = sv.Addr
+		}
 	case reflect.Map:
 		if recurseLevel <= cfg.MaxVariableRecurse {
 			v.loadMap(recurseLevel, cfg)
@@ -1909,6 +1918,10 @@ func (v *Variable) writeCopy(srcv *Variable) error {
 }
 
 func (v *Variable) readFunctionPtr() {
+	if v.Native {
+		// pc
+		return
+	}
 	// dereference pointer to find function pc
 	v.closureAddr = v.funcvalAddr()
 	if v.Unreadable != nil {
@@ -2295,6 +2308,19 @@ func (v *Variable) readInterface() (_type, data *Variable, isnil bool) {
 }
 
 func (v *Variable) loadInterface(recurseLevel int, loadData bool, cfg LoadConfig) {
+	if v.Native {
+		intfType := v.RealType.(*godwarf.InterfaceType)
+		intf, addr, err := parseInterface(uintptr(v.Addr), intfType)
+		if err != nil {
+			v.Unreadable = err
+			return
+		}
+		child := newVariable("data", uint64(addr), intfType.Type, v.bi, v.mem)
+		child.InterfaceValue = intf
+		child.loaded = true
+		v.Children = []Variable{*child}
+		return
+	}
 	_type, data, isnil := v.readInterface()
 
 	if isnil {
